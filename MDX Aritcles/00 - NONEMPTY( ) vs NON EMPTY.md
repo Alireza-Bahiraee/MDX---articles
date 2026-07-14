@@ -1,12 +1,31 @@
-# What is the difference between nonempty() and non empty in the mdx query
+# NONEMPTY() vs NON EMPTY in MDX  
+### What’s the real difference?
 
-In MDX (for SQL Server Analysis Services and related OLAP engines), `NONEMPTY()` is a function, while `NON EMPTY` is a keyword (prefix) used on query axes. They are similar in goal (removing empty rows/columns), but they have key differences in when and how they are evaluated, and in their behavior with calculations.
+In MDX (for SQL Server Analysis Services and related OLAP engines), `NONEMPTY()` is a **function**, while `NON EMPTY` is a **keyword** used on query axes.  
 
-## 1. Syntax and role
+Both aim to remove “empty” rows/columns, but they behave differently in **when** and **how** they filter data—especially when calculations and multiple axes are involved.
 
-- `NONEMPTY(set_expression [, set_expression2])`
-    - A function that returns a set of tuples that are not empty when evaluated against another set (usually a measure).
-    - Example:
+---
+
+## 🔍 Quick overview
+
+| Aspect                  | `NONEMPTY()`                               | `NON EMPTY` keyword                        |
+|-------------------------|---------------------------------------------|--------------------------------------------|
+| Type                    | Function                                    | Keyword / axis prefix                      |
+| Where used              | Inside set expressions, named sets, WITH   | On axes in the `SELECT` clause             |
+| Evaluation time         | When the set/axis is built                 | Last, after all axes are computed          |
+| Filters based on        | Specific measure(s) you pass               | All measures on the other axes             |
+| Handles calculations    | Yes (uses cube calculations)               | Yes, but on final result set               |
+| Duplicates              | Preserves duplicate tuples                 | Works on final result (no explicit dupes)  |
+| Typical use case        | Fine-grained control, named sets           | Simple, Excel-like queries                 |
+
+---
+
+## 1️⃣ Syntax and role
+
+### `NONEMPTY(set_expression [, set_expression2])`
+
+A function that returns a set of tuples that are not empty when evaluated against another set (usually a measure).
 
 ```mdx
 NONEMPTY(
@@ -15,10 +34,16 @@ NONEMPTY(
 )
 ```
 
-    - Used inside set expressions, named sets, or in combination with `WITH`, `SUM`, etc.
-- `NON EMPTY` (keyword)
-    - A prefix on an axis in the `SELECT` clause.
-    - Example:
+- Used inside:
+  - Set expressions
+  - Named sets (`WITH SET ...`)
+  - Combined with `SUM`, `FILTER`, etc.
+
+---
+
+### `NON EMPTY` (keyword)
+
+A prefix on an axis in the `SELECT` clause.
 
 ```mdx
 SELECT
@@ -27,37 +52,60 @@ SELECT
 FROM [Adventure Works]
 ```
 
-    - Applies to the whole axis; it removes tuples that are empty across the measures on the other axes.
+- Applies to the **whole axis**.
+- Removes tuples that are empty across the measures on the other axes.
 
+---
 
-## 2. When they are evaluated
+## ⏱ 2. When they are evaluated
 
-The core difference is evaluation order:
+This is the **core difference**.
 
-- `NON EMPTY` keyword
-    - Evaluated last, after all axes have been computed.
-    - Steps:
+### `NON EMPTY` keyword
 
-1. Compute all axes (rows, columns, etc.).
-2. Then remove any tuples that are empty across the measures on those axes.
-    - As a result, it filters the final result set: any row that is empty for all measures on the COLUMNS axis is removed.
-- `NONEMPTY()` function
-    - Evaluated when the specific axis is evaluated, not at the end.
-    - It filters the set before it is combined with other axes.
-    - This means:
-        - It can behave differently when you have multiple axes.
-        - It can affect which members are present in the result *before* cross-join with other axes happens.
+- Evaluated **last**, after all axes have been computed.
+- Conceptual flow:
 
-From the literature:
-> The big difference between the NON EMPTY keyword and the NONEMPTY function is when the evaluation occurs in the MDX. The NON EMPTY keyword is the last thing that is evaluated, in other words after all axes have been evaluated then the NON EMPTY keyword is executed to remove any empty space from the final result set. The NONEMPTY function is evaluated when the specific axis is evaluated.[^3]
+```text
+1. Compute all axes (rows, columns, etc.)
+2. Build the full result grid
+3. Apply NON EMPTY → remove rows/columns that are empty
+   across all measures on the other axes
+```
 
-## 3. Behavior with calculations and duplicates
+So it filters the **final result set**.
 
-- `NONEMPTY()`:
-    - Takes into account calculations in the cube.
-    - Preserves duplicate tuples.
-    - Non-empty is a characteristic of the cells referenced by the tuples, not the tuples themselves.
-    - Example:
+---
+
+### `NONEMPTY()` function
+
+- Evaluated **when the specific axis/set is built**, not at the end.
+- Conceptual flow:
+
+```text
+1. Build the set using NONEMPTY(...)
+   → filter members based on given measure(s)
+2. Use that filtered set in the query
+3. Combine with other axes
+4. Final result is produced
+```
+
+So it can change which members exist **before** cross-join with other axes happens.
+
+> The big difference between the `NON EMPTY` keyword and the `NONEMPTY` function is **when** the evaluation occurs in the MDX.  
+> `NON EMPTY` is the last thing evaluated; `NONEMPTY()` is evaluated when the specific axis is evaluated. [^3]
+
+---
+
+## 🧮 3. Behavior with calculations and duplicates
+
+### `NONEMPTY()`
+
+- Takes cube **calculations** into account.
+- Preserves **duplicate tuples**.
+- “Non-empty” is a property of the **cells** referenced by the tuples, not the tuples themselves.
+
+Example:
 
 ```mdx
 NONEMPTY(
@@ -66,19 +114,24 @@ NONEMPTY(
 )
 ```
 
-This checks each customer against the `Sales Amount` measure (including any calculated values).
-- `NON EMPTY` keyword:
-    - Also removes empty space, but operates on the final result set.
-    - It is more “coarse” and works on the top level of the query after all axes are resolved.
-    - It is often simpler and more intuitive for typical Excel-style queries.
+- Each customer is checked against `Sales Amount`, including any calculated members.
 
-From Microsoft docs:
-> The NonEmpty function takes into account calculations and preserves duplicate tuples.
-> Non-empty is a characteristic of the cells referenced by the tuples, not the tuples themselves.[^4]
+---
 
-## 4. Practical differences (examples)
+### `NON EMPTY` keyword
 
-### 4.1. Using `NON EMPTY` on a single axis
+- Also removes empty space, but works on the **final result set**.
+- More “coarse” and global.
+- Typically what you get from Excel-style pivot queries.
+
+> The `NonEmpty` function takes into account calculations and preserves duplicate tuples.  
+> Non-empty is a characteristic of the cells referenced by the tuples, not the tuples themselves. [^4]
+
+---
+
+## 🧪 4. Practical differences (examples)
+
+### 4.1 Using `NON EMPTY` on a single axis
 
 ```mdx
 SELECT
@@ -87,11 +140,12 @@ SELECT
 FROM [Adventure Works]
 ```
 
-- This removes all countries that have no Sales Amount for any year on the COLUMNS axis.
-- It filters the final result set across all measures on the COLUMNS axis.
+- Removes all countries that have **no Sales Amount** for any year on the COLUMNS axis.
+- Filters the final result set across all measures on COLUMNS.
 
+---
 
-### 4.2. Using `NONEMPTY()` in a named set
+### 4.2 Using `NONEMPTY()` in a named set
 
 ```mdx
 WITH
@@ -106,46 +160,65 @@ SELECT
 FROM [Adventure Works]
 ```
 
-- Here, the set is filtered before it is cross-joined with the COLUMNS axis.
-- If you have multiple measures or complex hierarchies, the behavior can differ from `NON EMPTY` keyword.
+- The set is filtered **before** it is cross-joined with the COLUMNS axis.
+- With multiple measures or complex hierarchies, behavior can differ from `NON EMPTY`.
 
+---
 
-## 5. Performance considerations
+## ⚡ 5. Performance considerations
 
-- There is a common misconception that `NONEMPTY()` always performs better than `NON EMPTY`. This is not true. Performance depends on:
-    - The structure of the cube.
-    - The size of sets.
-    - Whether you’re using block mode vs cell-by-cell evaluation.
-- In some cases, `NON EMPTY` is more efficient because it works on the final set; in others, `NONEMPTY()` is better because it reduces sets earlier.
+There’s a common myth: “`NONEMPTY()` is always faster than `NON EMPTY`.”  
+That’s **not** universally true.
 
+Performance depends on:
 
-## 6. Which one should you use?
+- Cube structure and partitions
+- Size of the sets
+- Block mode vs cell-by-cell evaluation
+- How many measures and calculated members are involved
 
-- Use `NON EMPTY` keyword when:
-    - You want a simple, typical OLAP query (like from Excel).
-    - You want to remove empty rows/columns based on all measures on the other axes.
-    - You don’t need fine-grained control over set construction.
-- Use `NONEMPTY()` function when:
-    - You need to remove empty tuples based on a specific measure or set.
-    - You are building named sets or complex expressions.
-    - You care about how calculations and duplicates are handled.
+Sometimes:
 
+- `NON EMPTY` is more efficient (works on final set).
+- Sometimes `NONEMPTY()` is better (reduces sets earlier).
 
-## Summary
+Always test with your real queries and cube.
+
+---
+
+## ✅ 6. Which one should you use?
+
+### Use `NON EMPTY` when:
+
+- You want a simple, typical OLAP query (like from Excel).
+- You want to remove empty rows/columns based on **all** measures on the other axes.
+- You don’t need fine-grained control over set construction.
+
+### Use `NONEMPTY()` when:
+
+- You need to remove empty tuples based on a **specific measure** or set.
+- You are building **named sets** or complex expressions.
+- You care about how **calculations** and **duplicates** are handled.
+
+---
+
+## 🧭 Summary
 
 - `NONEMPTY()`
-    - Function.
-    - Evaluated when the axis is built.
-    - Can filter based on a specific measure/set.
-    - Takes calculations into account and preserves duplicates.
+  - Function.
+  - Evaluated when the axis/set is built.
+  - Can filter based on a specific measure/set.
+  - Takes calculations into account and preserves duplicates.
+
 - `NON EMPTY`
-    - Keyword/prefix on axes.
-    - Evaluated last, after all axes are computed.
-    - Filters the final result set across all measures on the other axes.
-    - More “global” and simpler for typical queries.
+  - Keyword/prefix on axes.
+  - Evaluated last, after all axes are computed.
+  - Filters the final result set across all measures on the other axes.
+  - More global and simpler for typical queries.
 
-## Sources:
+---
 
+## Sources
 
 <ul>
   <li><a href="https://sqldusty.com/2012/08/10/non-empty-vs-nonempty-to-the-death/">NON EMPTY vs Nonempty(): To the Death!</a></li>
